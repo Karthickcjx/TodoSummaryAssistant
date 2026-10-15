@@ -12,7 +12,8 @@ pipeline {
         IMAGE_NAME = '066107820394.dkr.ecr.ap-south-1.amazonaws.com/todo-backend'
         REGISTRY = 'https://066107820394.dkr.ecr.ap-south-1.amazonaws.com'
         REGISTRY_CREDENTIAL = 'ecr:ap-south-1:jenkins-user'
-        
+        EC2_USER = 'ubuntu'
+        EC2_HOST = '172.31.0.119'
     }
 
     stages {
@@ -78,6 +79,27 @@ pipeline {
                         dockerImage.push("${BUILD_NUMBER}")
                         dockerImage.push('latest')
                     }
+                }
+            }
+        }
+        stage('Remove Container Images'){
+            steps{
+                sh 'docker rmi -f $(docker images -a -q)'
+            }
+        }
+        stage('Deploy to EC2') {
+            steps {
+                sshagent(['ec2-ssh-key']) {
+                    sh """
+                        ssh -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_HOST} '
+                            aws ecr get-login-password --region ap-south-1 | docker login --username AWS --password-stdin 066107820394.dkr.ecr.ap-south-1.amazonaws.com
+                            docker pull ${IMAGE_NAME}:${BUILD_NUMBER}
+                            docker stop todo-backend || true
+                            docker rm todo-backend || true
+                            docker run -d --name todo-backend --restart always -p 8080:8080 ${IMAGE_NAME}:${BUILD_NUMBER}
+                            docker image prune -f
+                        '
+                    """
                 }
             }
         }
