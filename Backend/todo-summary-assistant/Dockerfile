@@ -1,18 +1,15 @@
-# Build the Spring Boot application.
+# Stage 1: Build the JAR using Maven
 FROM maven:3.9.9-eclipse-temurin-17-alpine AS build
-WORKDIR /workspace
+WORKDIR /app
 
 COPY pom.xml .
-RUN mvn -B dependency:go-offline
-
 COPY src ./src
-RUN mvn -B -DskipTests package
 
-# Run with a smaller JRE image as an unprivileged user.
+RUN mvn clean package -DskipTests
+
+# Stage 2: Create a lightweight runtime image
 FROM eclipse-temurin:17-jre-alpine AS runtime
 WORKDIR /app
-RUN addgroup -S -g 10001 app && adduser -S -u 10001 -G app app
-COPY --from=build --chown=app:app /workspace/target/todo-summary-assistant-0.0.1-SNAPSHOT.jar /app/app.jar
-USER app
+COPY --from=build /app/target/*.jar app.jar
 EXPOSE 8080
-ENTRYPOINT ["java", "-XX:MaxRAMPercentage=75.0", "-jar", "/app/app.jar"]
+ENTRYPOINT ["java","-jar", "app.jar"]
