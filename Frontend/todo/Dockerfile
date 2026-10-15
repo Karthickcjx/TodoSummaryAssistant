@@ -1,17 +1,14 @@
-# Compile the React app.
-FROM node:22-alpine AS build
-WORKDIR /workspace
+FROM node:20-alpine
 
+WORKDIR /app
+
+# 1. Copy package files and install dependencies first (cached unless package.json changes)
 COPY package*.json ./
-RUN npm ci
+RUN npm install
 
+# 2. Copy the rest of your source code
 COPY . .
-ARG REACT_APP_API_BASE_URL=http://localhost:8080/api
-ENV REACT_APP_API_BASE_URL=$REACT_APP_API_BASE_URL
-RUN npm run build
 
-# Serve static files with an unprivileged Nginx image.
-FROM nginxinc/nginx-unprivileged:1.27-alpine AS runtime
-COPY nginx.conf /etc/nginx/conf.d/default.conf
-COPY --from=build /workspace/build /usr/share/nginx/html
-EXPOSE 8080
+EXPOSE 3000
+
+CMD ["npm", "start"]
