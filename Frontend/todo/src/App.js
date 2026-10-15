@@ -78,7 +78,8 @@ function App() {
       showNotification(response.data, 'success');
     } catch (error) {
       console.error('Error summarizing and sending to Slack:', error);
-      showNotification('Failed to summarize and send to Slack.', 'error');
+      const message = error.response?.data || 'Failed to summarize and send to Slack.';
+      showNotification(message, 'error');
     }
   };
 

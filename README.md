@@ -34,6 +34,19 @@ A full-stack application to manage personal to-do items, summarize pending tasks
 
 ## Setup Instructions
 
+### Run with Docker Compose
+
+1. Copy `.env.example` to `.env` in the repository root and set your MySQL password, Cohere API key, and Slack webhook URL.
+2. From the repository root, run:
+   ```bash
+   docker compose up --build
+   ```
+3. Open `http://localhost:3000`. The API is available at `http://localhost:8080`.
+
+To stop the containers, run `docker compose down`. MySQL data remains in a Docker volume.
+
+The backend and frontend use separate multi-stage Dockerfiles; the runtime stages run as unprivileged users.
+
 ### Prerequisites
 
 * Java Development Kit (JDK) 17 or higher
