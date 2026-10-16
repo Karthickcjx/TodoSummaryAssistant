@@ -156,13 +156,15 @@ pipeline {
                         -e SLACK_WEBHOOK_URL="${SLACK}" \\
                         --restart always -p 8080:8080 ${BACKEND_IMAGE}:${BUILD_NUMBER}
 
-        
+                    PUBLIC_IP=\$(curl -s http://checkip.amazonaws.com)
+                    echo "Your EC2 Public IP is: $PUBLIC_IP"
                     docker pull ${FRONTEND_IMAGE}:${BUILD_NUMBER}
                     docker stop todo-frontend || true
                     docker rm todo-frontend || true
                     docker run -d -i --name todo-frontend --network todo-net \\
-                        -e REACT_APP_API_BASE_URL="${REACT_APP_API_BASE_URL}" \\
                         --restart always -p 80:3000 ${FRONTEND_IMAGE}:${BUILD_NUMBER}
+                    docker exec todo-frontend sh -c "echo 'REACT_APP_API_BASE_URL=http://${PUBLIC_IP}:8080/api' > /app/.env"
+                    docker restart todo-frontend
 
                     docker rmi \$(docker images -q) || true
                 '
