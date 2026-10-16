@@ -5,7 +5,7 @@ pipeline {
     tools {
         maven 'Maven3'
         jdk 'JDK17'
-        nodejs 'NodeJS'
+        nodejs 'nodejs'
     }
 
     environment {
@@ -162,9 +162,9 @@ pipeline {
                     docker rm todo-frontend || true
                     docker run -d -i --name todo-frontend --network todo-net \\
                         -e REACT_APP_API_BASE_URL="${REACT_APP_API_BASE_URL}" \\
-                        --restart always -p 3000:3000 ${FRONTEND_IMAGE}:${BUILD_NUMBER}
+                        --restart always -p 80:3000 ${FRONTEND_IMAGE}:${BUILD_NUMBER}
 
-                    docker image prune -f
+                    docker rmi \$(docker images -q) || true
                 '
             """
         }
