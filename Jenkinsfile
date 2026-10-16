@@ -1,19 +1,38 @@
+
 pipeline {
     agent any
 
     tools {
         maven 'Maven3'
         jdk 'JDK17'
+        nodejs 'NodeJS'
     }
 
     environment {
         GIT_URL = 'https://github.com/Karthickcjx/TodoSummaryAssistant.git'
         GIT_BRANCH = 'main'
-        IMAGE_NAME = '066107820394.dkr.ecr.ap-south-1.amazonaws.com/todo-backend'
+        
+        BACKEND_DIR = 'Backend/todo-summary-assistant'
+        FRONTEND_DIR = 'Frontend/todo'
+        
+        BACKEND_IMAGE = '066107820394.dkr.ecr.ap-south-1.amazonaws.com/todo-backend'
+        FRONTEND_IMAGE = '066107820394.dkr.ecr.ap-south-1.amazonaws.com/todo-frontend'
+        
         REGISTRY = 'https://066107820394.dkr.ecr.ap-south-1.amazonaws.com'
         REGISTRY_CREDENTIAL = 'ecr:ap-south-1:jenkins-user'
+        
         EC2_USER = 'ubuntu'
         EC2_HOST = '172.31.0.119'
+
+        // Backend Secret Text Credentials in Jenkins
+        DB_PASSWORD = credentials('DB_PASSWORD')
+        DB_USER     = credentials('DB_USER')
+        DB_URL      = credentials('DB_URL')
+        COHERE      = credentials('COHERE')
+        SLACK       = credentials('SLACK')
+
+        // Frontend Secret Text Credential in Jenkins (e.g., http://<TARGET_EC2_PUBLIC_IP>:8080/api)
+        REACT_APP_API_BASE_URL = credentials('REACT_APP_API_BASE_URL')
     }
 
     stages {
@@ -23,29 +42,29 @@ pipeline {
             }
         }
 
-        stage('Build') {
+        stage('Build Backend') {
             steps {
-                dir('Backend/todo-summary-assistant') {
+                dir("${BACKEND_DIR}") {
                     sh 'mvn clean install -DskipTests'
                 }
             }
         }
 
-        stage('Unit Test') {
+        stage('Unit Test Backend') {
             steps {
-                dir('Backend/todo-summary-assistant') {
+                dir("${BACKEND_DIR}") {
                     sh 'mvn test'
                 }
             }
         }
 
-        stage('Sonar Code Analysis') {
+        stage('Sonar Analysis - Backend') {
             environment {
                 scannerHome = tool 'Sonar8.0'
             }
             steps {
                 withSonarQubeEnv('sonarserver') {
-                    dir('Backend/todo-summary-assistant') {
+                    dir("${BACKEND_DIR}") {
                         sh '''
                             ${scannerHome}/bin/sonar-scanner \
                             -Dsonar.projectKey=todo-summary-assistant \
@@ -61,47 +80,95 @@ pipeline {
             }
         }
 
-        stage('Build App Image') {
+        stage('Sonar Analysis - Frontend') {
+            environment {
+                scannerHome = tool 'Sonar8.0'
+            }
+            steps {
+                withSonarQubeEnv('sonarserver') {
+                    dir("${FRONTEND_DIR}") {
+                        sh '''
+                            ${scannerHome}/bin/sonar-scanner \
+                            -Dsonar.projectKey=todo-frontend \
+                            -Dsonar.projectName=todo-frontend \
+                            -Dsonar.projectVersion=1.0 \
+                            -Dsonar.sources=src
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage('Build App Images') {
             steps {
                 script {
-                    dockerImage = docker.build(
-                        "${IMAGE_NAME}:${BUILD_NUMBER}",
-                        "./Backend/todo-summary-assistant"
+                    backendImage = docker.build(
+                        "${BACKEND_IMAGE}:${BUILD_NUMBER}",
+                        "./${BACKEND_DIR}"
+                    )
+                    frontendImage = docker.build(
+                        "${FRONTEND_IMAGE}:${BUILD_NUMBER}",
+                        "./${FRONTEND_DIR}"
                     )
                 }
             }
         }
 
-        stage('Upload App Image') {
+        stage('Upload App Images') {
             steps {
                 script {
                     docker.withRegistry(REGISTRY, REGISTRY_CREDENTIAL) {
-                        dockerImage.push("${BUILD_NUMBER}")
-                        dockerImage.push('latest')
+                        backendImage.push("${BUILD_NUMBER}")
+                        backendImage.push('latest')
+                        
+                        frontendImage.push("${BUILD_NUMBER}")
+                        frontendImage.push('latest')
                     }
                 }
             }
         }
-        stage('Remove Container Images'){
-            steps{
-                sh 'docker rmi -f $(docker images -a -q)'
+
+        stage('Remove Container Images') {
+            steps {
+                sh 'docker rmi -f $(docker images -a -q) || true'
             }
         }
-        stage('Deploy to EC2') {
+
+        stage('Deploy Backend & Frontend to EC2') {
             steps {
                 sshagent(['ec2-ssh-key']) {
                     sh """
-                        ssh -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_HOST} '
-                            aws ecr get-login-password --region ap-south-1 | docker login --username AWS --password-stdin 066107820394.dkr.ecr.ap-south-1.amazonaws.com
-                            docker pull ${IMAGE_NAME}:${BUILD_NUMBER}
-                            docker stop todo-backend || true
-                            docker rm todo-backend || true
-                            docker run -d --name todo-backend --restart always -p 8080:8080 ${IMAGE_NAME}:${BUILD_NUMBER}
-                            docker image prune -f
-                        '
-                    """
-                }
-            }
+                    ssh -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_HOST} '
+                    aws ecr get-login-password --region ap-south-1 | docker login --username AWS --password-stdin 066107820394.dkr.ecr.ap-south-1.amazonaws.com
+                    
+                
+                    docker network create todo-net || true
+
+        
+                    docker pull ${BACKEND_IMAGE}:${BUILD_NUMBER}
+                    docker stop todo-backend || true
+                    docker rm todo-backend || true
+                    docker run -d --name todo-backend --network todo-net \\
+                        -e SPRING_DATASOURCE_PASSWORD="${DB_PASSWORD}" \\
+                        -e SPRING_DATASOURCE_USERNAME="${DB_USER}" \\
+                        -e SPRING_DATASOURCE_URL="${DB_URL}" \\
+                        -e COHERE_API_KEY="${COHERE}" \\
+                        -e SLACK_WEBHOOK_URL="${SLACK}" \\
+                        --restart always -p 8080:8080 ${BACKEND_IMAGE}:${BUILD_NUMBER}
+
+        
+                    docker pull ${FRONTEND_IMAGE}:${BUILD_NUMBER}
+                    docker stop todo-frontend || true
+                    docker rm todo-frontend || true
+                    docker run -d -i --name todo-frontend --network todo-net \\
+                        -e REACT_APP_API_BASE_URL="${REACT_APP_API_BASE_URL}" \\
+                        --restart always -p 3000:3000 ${FRONTEND_IMAGE}:${BUILD_NUMBER}
+
+                    docker image prune -f
+                '
+            """
         }
+    }
+}
     }
 }
