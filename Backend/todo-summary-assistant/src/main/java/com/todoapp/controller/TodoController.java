@@ -14,7 +14,7 @@ import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/todos")
-@CrossOrigin(origins = "*") // Allow frontend access
+@CrossOrigin(originPatterns = "*") // Allow frontend access
 public class TodoController {
 
     @Autowired
