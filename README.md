@@ -34,6 +34,28 @@ A full-stack application to manage personal to-do items, summarize pending tasks
 
 ## Setup Instructions
 
+### Docker Compose
+
+From the repository root, run `docker compose up -d --build`. Open
+`http://localhost:3000` locally or `http://<server-ip>:3000` remotely.
+The browser requests `/api/todos` on the same host and port as the frontend;
+Nginx forwards `/api/` requests to `backend:8080` over the Compose network.
+The backend connects to `mysql:3306` on that network.
+
+React's API URL is baked into the build. After updating it or pulling these
+changes onto a server, rebuild with `docker compose up -d --build` and refresh
+the browser. Do not set the Docker frontend URL to `localhost:8080` or `backend:8080`:
+the browser runs outside the Compose network.
+
+For optional Cohere and Slack integrations, set `COHERE_API_KEY` and
+`SLACK_WEBHOOK_URL` in a `.env` file beside `docker-compose.yaml`.
+Compose does not automatically load `Backend/todo-summary-assistant/.env`.
+
+To diagnose deployment issues, run `docker compose ps`,
+`docker compose logs --tail=100 frontend backend mysql`, and
+`curl http://localhost:3000/api/todos` on the server. The last command should
+return JSON once the backend has started.
+
 ### Prerequisites
 
 * Java Development Kit (JDK) 17 or higher
