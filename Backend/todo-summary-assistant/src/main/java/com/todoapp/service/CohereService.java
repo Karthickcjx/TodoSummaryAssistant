@@ -2,6 +2,7 @@ package com.todoapp.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import okhttp3.*;
 import org.springframework.beans.factory.annotation.Value;
@@ -29,13 +30,21 @@ public class CohereService {
     }
 
     public String summarizeText(String text) throws IOException {
-        String url = "https://api.cohere.ai/v1/summarize"; // Check Cohere's latest API endpoint
+        if (cohereApiKey == null || cohereApiKey.isBlank()) {
+            throw new IOException("Cohere API key is not configured. Set COHERE_API_KEY in the backend environment.");
+        }
 
+        String url = "https://api.cohere.com/v2/chat";
         ObjectNode requestBodyJson = objectMapper.createObjectNode();
-        requestBodyJson.put("text", text);
-        requestBodyJson.put("length", "long"); // "short", "medium", "long"
-        requestBodyJson.put("format", "paragraph"); // "paragraph", "bullets"
-        requestBodyJson.put("model", "command"); // Or "command-light"
+        requestBodyJson.put("model", "command-a-plus-05-2026");
+        requestBodyJson.put("max_tokens", 300);
+        ArrayNode messages = requestBodyJson.putArray("messages");
+        messages.addObject()
+                .put("role", "system")
+                .put("content", "Summarize the to-do items clearly and concisely as a paragraph.");
+        messages.addObject()
+                .put("role", "user")
+                .put("content", text);
 
         RequestBody body = RequestBody.create(
                 requestBodyJson.toString(),
@@ -50,12 +59,32 @@ public class CohereService {
                 .build();
 
         try (Response response = httpClient.newCall(request).execute()) {
+            ResponseBody responseBody = response.body();
+            String responseText = responseBody == null ? "" : responseBody.string();
             if (!response.isSuccessful()) {
-                throw new IOException("Unexpected code " + response + " Body: " + response.body().string());
+                throw new IOException("Cohere API request failed with HTTP " + response.code() + ": " + responseText);
             }
-            String responseBody = response.body().string();
-            JsonNode jsonNode = objectMapper.readTree(responseBody);
-            return jsonNode.has("summary") ? jsonNode.get("summary").asText() : "No summary found.";
+
+            JsonNode jsonNode = objectMapper.readTree(responseText);
+            JsonNode content = jsonNode.at("/message/content");
+            StringBuilder summary = new StringBuilder();
+            if (content.isArray()) {
+                for (JsonNode block : content) {
+                    if ("text".equals(block.path("type").asText())) {
+                        String textBlock = block.path("text").asText("");
+                        if (!textBlock.isBlank()) {
+                            if (summary.length() > 0) {
+                                summary.append("\n");
+                            }
+                            summary.append(textBlock);
+                        }
+                    }
+                }
+            }
+            if (summary.isEmpty()) {
+                throw new IOException("Cohere response did not contain generated summary text.");
+            }
+            return summary.toString();
         }
     }
 }

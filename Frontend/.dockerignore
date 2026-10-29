@@ -1,0 +1,7 @@
+todo/node_modules
+todo/build
+todo/.env
+todo/.env.local
+todo/.env.development.local
+todo/.env.production.local
+.git

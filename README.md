@@ -49,15 +49,12 @@ A full-stack application to manage personal to-do items, summarize pending tasks
     git clone [https://github.com/your-username/todo-summary-assistant.git](https://github.com/your-username/todo-summary-assistant.git)
     cd todo-summary-assistant/backend
     ```
-2.  **Configure `application.properties`:**
-    Open `src/main/resources/application.properties` and update the following:
-    ```properties
-    spring.datasource.url=jdbc:mysql://localhost:3306/todo_db?createDatabaseIfNotExist=true
-    spring.datasource.username=root
-    spring.datasource.password=your_mysql_password_here # <-- IMPORTANT: Replace with your MySQL root password
-    cohere.api.key=YOUR_COHERE_API_KEY # <-- IMPORTANT: Replace with your Cohere API Key
-    slack.webhook.url=YOUR_SLACK_WEBHOOK_URL # <-- IMPORTANT: Replace with your Slack Incoming Webhook URL
-    ```
+2.  **Configure environment variables:**
+    Copy `Backend/todo-summary-assistant/.env.example` to `.env` in the backend directory
+    and set your database password, Cohere API key, and Slack webhook URL there.
+    The backend loads `.env` automatically. Alternatively, define `SPRING_DATASOURCE_PASSWORD`,
+    `COHERE_API_KEY`, and `SLACK_WEBHOOK_URL` in the environment where the backend runs.
+    Do not commit `.env`.
 3.  **Build and Run:**
     ```bash
     mvn clean install
@@ -87,7 +84,7 @@ A full-stack application to manage personal to-do items, summarize pending tasks
 
 1.  **Create a Cohere Account:** Visit [Cohere.ai](https://cohere.ai/) and sign up for a free account.
 2.  **Obtain API Key:** Once logged in, navigate to your dashboard or API keys section to find your API key.
-3.  **Update `application.properties`:** Paste your Cohere API key into `cohere.api.key` in the backend's `application.properties` file.
+3.  **Set `COHERE_API_KEY`:** Add your Cohere API key to the backend `.env` file or environment.
 
 ## Slack Integration Setup
 
@@ -103,7 +100,7 @@ A full-stack application to manage personal to-do items, summarize pending tasks
     * Click "Allow".
 3.  **Copy Webhook URL:**
     * A unique Webhook URL will be generated. Copy this URL.
-4.  **Update `application.properties`:** Paste this URL into `slack.webhook.url` in the backend's `application.properties` file.
+4.  **Set `SLACK_WEBHOOK_URL`:** Add this URL to the backend `.env` file or environment.
 
 ## Design/Architecture Decisions
 
