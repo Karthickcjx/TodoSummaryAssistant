@@ -1,0 +1,44 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mysql
+  labels:
+    app: mysql
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: mysql
+  template:
+    metadata:
+      labels:
+        app: mysql
+    spec:
+      containers:
+      - name: mysql
+        image: mysql:8.4
+        ports:
+        - containerPort: 3306
+          name: mysql-port
+        volumeMounts:
+        - mountPath: /var/lib/mysql
+          name: vpro-db-data
+        env:
+          - name: MYSQL_DATABASE
+            value: todo_db
+          - name: MYSQL_ROOT_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: todo-secret
+                key: db-pass
+        readinessProbe:
+          exec:
+            command: ["sh", "-c", "mysqladmin ping -h 127.0.0.1 -p$MYSQL_ROOT_PASSWORD"]
+          initialDelaySeconds: 20
+          periodSeconds: 10
+      volumes:
+        - name: vpro-db-data
+          persistentVolumeClaim:
+            claimName: db-pvc

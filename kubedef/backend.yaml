@@ -1,0 +1,44 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  labels:
+    app: backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: backend
+  template:
+    metadata:
+      labels:
+        app: backend
+    spec:
+      containers:
+      - name: backend
+        image: karthickcjx/todosummaryassistant-backend:latest
+        ports:
+        - containerPort: 8080
+          name: backend-port
+        env:
+          - name: SPRING_DATASOURCE_URL
+            value: jdbc:mysql://mysql:3306/todo_db?createDatabaseIfNotExist=true
+          - name: SPRING_DATASOURCE_USERNAME
+            value: root
+          - name: SPRING_DATASOURCE_PASSWORD
+            valueFrom:
+             secretKeyRef:
+               name: todo-secret
+               key: db-pass
+          - name: COHERE_API_KEY
+            valueFrom:
+              secretKeyRef:
+               name: todo-secret
+               key: cohere
+          - name: SLACK_WEBHOOK_URL
+            valueFrom:
+              secretKeyRef:
+               name: todo-secret
+               key: slack
+
+
