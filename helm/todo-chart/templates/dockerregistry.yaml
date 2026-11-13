@@ -1,0 +1,9 @@
+{{- if .Values.dockerregistry.enabled }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: todo-registry
+type: kubernetes.io/dockerconfigjson
+data:
+  .dockerconfigjson: {{ dict "auths" (dict (required "dockerregistry.server is required" .Values.dockerregistry.server) (dict "username" (required "dockerregistry.username is required" .Values.dockerregistry.username) "password" (required "dockerregistry.password is required" .Values.dockerregistry.password) "email" .Values.dockerregistry.email "auth" (printf "%s:%s" .Values.dockerregistry.username .Values.dockerregistry.password | b64enc))) | toJson | b64enc | quote }}
+{{- end }}

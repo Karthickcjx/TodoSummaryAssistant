@@ -1,0 +1,27 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+spec:
+  replicas: {{ .Values.frontend.replicas }}
+  selector:
+    matchLabels:
+      app: frontend
+  template:
+    metadata:
+      labels:
+        app: frontend
+    spec:
+      {{- if .Values.dockerregistry.enabled }}
+      imagePullSecrets:
+        - name: todo-registry
+      {{- end }}
+      containers:
+        - name: frontend
+          image: {{ printf "%s:%s" .Values.frontend.image (required "frontend.tag must not be empty" .Values.frontend.tag) | quote }}
+          ports:
+            - name: frontend-port
+              containerPort: {{ .Values.frontend.containerPort }}
+          env:
+            - name: REACT_APP_API_BASE_URL
+              value: /api/todos
