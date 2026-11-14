@@ -1,0 +1,182 @@
+name: Build and publish
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: todo-ecr-release
+  cancel-in-progress: false
+
+env:
+  BACKEND_DIR: Backend/todo-summary-assistant
+  FRONTEND_DIR: Frontend/todo
+  BACKEND_REPOSITORY: ${{ vars.ECR_BACKEND_REPOSITORY || 'todo-backendimg' }}
+  FRONTEND_REPOSITORY: ${{ vars.ECR_FRONTEND_REPOSITORY || 'todo-frontendimg' }}
+  IMAGE_TAG: ${{ github.run_number }}
+  HELM_BRANCH: ${{ vars.HELM_BRANCH || 'todo-helm' }}
+  HELM_VALUES_FILE: ${{ vars.HELM_VALUES_FILE || 'helm/todo-chart/values.yaml' }}
+
+jobs:
+  release:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_DATABASE: todo_ci
+          MYSQL_ROOT_PASSWORD: ${{ secrets.CI_DB_PASSWORD || 'ci-only-password' }}
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 --silent"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=12
+    steps:
+      - name: Fetch source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+          cache-dependency-path: Backend/todo-summary-assistant/pom.xml
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: Frontend/todo/package-lock.json
+
+      - name: Package backend JAR
+        working-directory: ${{ env.BACKEND_DIR }}
+        run: mvn -B -ntp clean package -DskipTests dependency:copy-dependencies
+
+      - name: Archive backend JAR
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-jar-${{ github.run_number }}-${{ github.run_attempt }}
+          path: Backend/todo-summary-assistant/target/*.jar
+          if-no-files-found: error
+
+      - name: Backend tests and coverage
+        working-directory: ${{ env.BACKEND_DIR }}
+        env:
+          SPRING_DATASOURCE_URL: jdbc:mysql://127.0.0.1:3306/todo_ci?allowPublicKeyRetrieval=true&useSSL=false
+          SPRING_DATASOURCE_USERNAME: root
+          SPRING_DATASOURCE_PASSWORD: ${{ secrets.CI_DB_PASSWORD || 'ci-only-password' }}
+        run: >-
+          mvn -B -ntp
+          org.jacoco:jacoco-maven-plugin:0.8.12:prepare-agent
+          test
+          org.jacoco:jacoco-maven-plugin:0.8.12:report
+
+      - name: Frontend tests and coverage
+        working-directory: ${{ env.FRONTEND_DIR }}
+        env:
+          CI: 'true'
+        run: |
+          npm ci
+          # No frontend tests exist yet; failing tests will still fail this step.
+          npm test -- --watchAll=false --coverage --runInBand --passWithNoTests
+          if [ ! -f coverage/lcov.info ]; then
+            echo '::warning::No frontend coverage report was generated; add frontend unit tests.'
+          fi
+
+      - name: Backend SonarQube analysis and quality gate
+        uses: SonarSource/sonarqube-scan-action@v6
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
+        with:
+          args: >-
+            -Dproject.settings=sonar-setup.properties
+            -Dsonar.qualitygate.wait=true
+
+      - name: Frontend SonarQube analysis and quality gate
+        uses: SonarSource/sonarqube-scan-action@v6
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
+        with:
+          args: >-
+            -Dproject.settings=sonar-frontend.properties
+            -Dsonar.qualitygate.wait=true
+
+      - name: Authenticate to AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Log in to Amazon ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build both Docker images
+        env:
+          ECR_REGISTRY: ${{ steps.ecr.outputs.registry }}
+          API_BASE_URL: ${{ vars.REACT_APP_API_BASE_URL || '/api/todos' }}
+        run: |
+          docker build -f Backend/Dockerfile \
+            -t "$ECR_REGISTRY/$BACKEND_REPOSITORY:$IMAGE_TAG" \
+            -t "$ECR_REGISTRY/$BACKEND_REPOSITORY:latest" Backend
+          docker build -f Frontend/Dockerfile \
+            --build-arg "REACT_APP_API_BASE_URL=$API_BASE_URL" \
+            -t "$ECR_REGISTRY/$FRONTEND_REPOSITORY:$IMAGE_TAG" \
+            -t "$ECR_REGISTRY/$FRONTEND_REPOSITORY:latest" Frontend
+
+      - name: Push both images with build number and latest tags
+        env:
+          ECR_REGISTRY: ${{ steps.ecr.outputs.registry }}
+        run: |
+          for repository in "$BACKEND_REPOSITORY" "$FRONTEND_REPOSITORY"; do
+            docker push "$ECR_REGISTRY/$repository:$IMAGE_TAG"
+            docker push "$ECR_REGISTRY/$repository:latest"
+          done
+
+      - name: Fetch Helm branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.HELM_BRANCH }}
+          path: helm-release
+          token: ${{ secrets.HELM_PUSH_TOKEN || github.token }}
+
+      - name: Update and push Helm values
+        working-directory: helm-release
+        env:
+          ECR_REGISTRY: ${{ steps.ecr.outputs.registry }}
+        run: |
+          python -m pip install --quiet 'ruamel.yaml==0.18.10'
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          from ruamel.yaml import YAML
+          path = Path(os.environ['HELM_VALUES_FILE'])
+          yaml = YAML()
+          values = yaml.load(path)
+          for component in ('backend', 'frontend'):
+              repository = os.environ[f'{component.upper()}_REPOSITORY']
+              values[component]['image'] = f"{os.environ['ECR_REGISTRY']}/{repository}"
+              values[component]['tag'] = os.environ['IMAGE_TAG']
+          yaml.dump(values, path)
+          PY
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- "$HELM_VALUES_FILE"
+          git diff --cached --quiet && exit 0
+          git commit -m "chore(helm): deploy build $IMAGE_TAG"
+          git push origin "HEAD:$HELM_BRANCH"
