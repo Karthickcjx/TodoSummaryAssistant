@@ -1,7 +1,7 @@
 variable "region" {
   description = "AWS region for the cluster."
   type        = string
-  default     = "us-east-1"
+  default     = "ap-south-1"
 }
 
 variable "cluster_name" {
@@ -19,7 +19,7 @@ variable "vpc_cidr" {
 variable "node_instance_type" {
   description = "EC2 instance type for worker nodes."
   type        = string
-  default     = "t3.large"
+  default     = "c7i-flex.large"
 }
 
 variable "node_min_size" {
