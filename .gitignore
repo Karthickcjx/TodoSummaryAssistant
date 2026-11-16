@@ -1,0 +1,17 @@
+﻿# Local environment configuration
+.env
+.env.*
+!.env.example
+
+# Terraform working files and state
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+*.tfvars.json
+!*.example.tfvars
+crash.log
+crash.*.log
+
+# Scanner output
+.scannerwork/
