@@ -10,7 +10,7 @@ frontend:
   tag: '5'
   replicas: 1
   containerPort: 80
-  servicePort: 80
+  servicePort: 3000
 
 db:
   image: mysql
@@ -30,7 +30,7 @@ secret:
 ingress:
   enabled: true
   host: todo.kcthdevops.site
-  servicePort: 80
+  servicePort: 3000
   certificateArn: arn:aws:acm:ap-south-1:066107820394:certificate/691c47a3-b053-4fa2-93c4-fac9f3e39734
 
 dockerregistry:
