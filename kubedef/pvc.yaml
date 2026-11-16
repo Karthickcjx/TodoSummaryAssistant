@@ -5,7 +5,7 @@ metadata:
   labels:
     app: db-pvc
 spec:
-  storageClassName: default
+  storageClassName: gp2
   accessModes:
     - ReadWriteOnce
   resources:
