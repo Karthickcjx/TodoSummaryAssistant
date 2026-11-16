@@ -1,13 +1,13 @@
 backend:
-  image: karthickcjx/todosummaryassistant-backend
-  tag: latest
+  image: 066107820394.dkr.ecr.ap-south-1.amazonaws.com/todo-backendimg
+  tag: '5'
   replicas: 1
   containerPort: 8080
   servicePort: 8080
 
 frontend:
-  image: karthickcjx/todosummaryassistant-frontend
-  tag: latest
+  image: 066107820394.dkr.ecr.ap-south-1.amazonaws.com/todo-frontendimg
+  tag: '5'
   replicas: 1
   containerPort: 80
   servicePort: 80
@@ -23,9 +23,9 @@ db:
   defaultUser: root
 
 secret:
-  dbPassword: ""
-  cohereApiKey: ""
-  slackWebhookUrl: ""
+  dbPassword: ''
+  cohereApiKey: ''
+  slackWebhookUrl: ''
 
 ingress:
   enabled: true
@@ -35,7 +35,7 @@ ingress:
 
 dockerregistry:
   enabled: false
-  server: ""
-  username: ""
-  password: ""
-  email: ""
+  server: ''
+  username: ''
+  password: ''
+  email: ''
