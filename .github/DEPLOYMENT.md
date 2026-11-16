@@ -2,7 +2,7 @@
 
 The workflow runs on pushes to `main` or manually from `main`.
 
-Stages: checkout -> package and archive JAR -> tests -> both SonarQube quality gates -> build Docker images -> push to ECR -> update Helm branch.
+Separate jobs package the backend, test the backend and frontend, run each SonarQube quality gate, build Docker images, push them to ECR, and update the Helm branch. Packaging and tests run in parallel; publishing waits for both quality gates and the package job. Coverage, Java binaries, and Docker images are passed between jobs as workflow artifacts.
 
 ## Required GitHub settings
 

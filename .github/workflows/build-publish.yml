@@ -1,4 +1,4 @@
-name: Build and publish
+﻿name: Build and publish
 
 on:
   push:
@@ -8,6 +8,9 @@ on:
 concurrency:
   group: todo-ecr-release
   cancel-in-progress: false
+
+permissions:
+  contents: read
 
 env:
   BACKEND_DIR: Backend/todo-summary-assistant
@@ -19,12 +22,34 @@ env:
   HELM_VALUES_FILE: ${{ vars.HELM_VALUES_FILE || 'helm/todo-chart/values.yaml' }}
 
 jobs:
-  release:
+  package-backend:
+    name: Package backend JAR
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    timeout-minutes: 60
-    permissions:
-      contents: write
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+          cache-dependency-path: Backend/todo-summary-assistant/pom.xml
+      - name: Package backend
+        working-directory: ${{ env.BACKEND_DIR }}
+        run: mvn -B -ntp clean package -DskipTests
+      - name: Archive backend JAR
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-jar-${{ github.run_number }}-${{ github.run_attempt }}
+          path: Backend/todo-summary-assistant/target/*.jar
+          if-no-files-found: error
+
+  test-backend:
+    name: Backend tests and coverage
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
     services:
       mysql:
         image: mysql:8.0
@@ -39,39 +64,14 @@ jobs:
           --health-timeout=5s
           --health-retries=12
     steps:
-      - name: Fetch source
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-
-      - name: Set up Java
-        uses: actions/setup-java@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
           cache: maven
           cache-dependency-path: Backend/todo-summary-assistant/pom.xml
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: npm
-          cache-dependency-path: Frontend/todo/package-lock.json
-
-      - name: Package backend JAR
-        working-directory: ${{ env.BACKEND_DIR }}
-        run: mvn -B -ntp clean package -DskipTests dependency:copy-dependencies
-
-      - name: Archive backend JAR
-        uses: actions/upload-artifact@v4
-        with:
-          name: backend-jar-${{ github.run_number }}-${{ github.run_attempt }}
-          path: Backend/todo-summary-assistant/target/*.jar
-          if-no-files-found: error
-
-      - name: Backend tests and coverage
+      - name: Run tests and generate coverage
         working-directory: ${{ env.BACKEND_DIR }}
         env:
           SPRING_DATASOURCE_URL: jdbc:mysql://127.0.0.1:3306/todo_ci?allowPublicKeyRetrieval=true&useSSL=false
@@ -82,21 +82,60 @@ jobs:
           org.jacoco:jacoco-maven-plugin:0.8.12:prepare-agent
           test
           org.jacoco:jacoco-maven-plugin:0.8.12:report
+          dependency:copy-dependencies
+      - name: Save backend analysis files
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-analysis
+          path: Backend/todo-summary-assistant/target/
+          if-no-files-found: error
 
-      - name: Frontend tests and coverage
+  test-frontend:
+    name: Frontend tests and coverage
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: Frontend/todo/package-lock.json
+      - name: Run tests and generate coverage
         working-directory: ${{ env.FRONTEND_DIR }}
         env:
           CI: 'true'
         run: |
           npm ci
-          # No frontend tests exist yet; failing tests will still fail this step.
           npm test -- --watchAll=false --coverage --runInBand --passWithNoTests
+          mkdir -p coverage
           if [ ! -f coverage/lcov.info ]; then
             echo '::warning::No frontend coverage report was generated; add frontend unit tests.'
           fi
+          touch coverage/artifact-marker
+      - name: Save frontend coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-coverage
+          path: Frontend/todo/coverage/
+          if-no-files-found: error
 
-      - name: Backend SonarQube analysis and quality gate
-        uses: SonarSource/sonarqube-scan-action@v6
+  sonar-backend:
+    name: Backend SonarQube quality gate
+    needs: test-backend
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: backend-analysis
+          path: Backend/todo-summary-assistant/target
+      - uses: SonarSource/sonarqube-scan-action@v6
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
@@ -105,8 +144,21 @@ jobs:
             -Dproject.settings=sonar-setup.properties
             -Dsonar.qualitygate.wait=true
 
-      - name: Frontend SonarQube analysis and quality gate
-        uses: SonarSource/sonarqube-scan-action@v6
+  sonar-frontend:
+    name: Frontend SonarQube quality gate
+    needs: test-frontend
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: frontend-coverage
+          path: Frontend/todo/coverage
+      - uses: SonarSource/sonarqube-scan-action@v6
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
@@ -115,50 +167,85 @@ jobs:
             -Dproject.settings=sonar-frontend.properties
             -Dsonar.qualitygate.wait=true
 
+  build-images:
+    name: Build Docker images
+    needs: [package-backend, sonar-backend, sonar-frontend]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build both images
+        env:
+          API_BASE_URL: ${{ vars.REACT_APP_API_BASE_URL || '/api/todos' }}
+        run: |
+          docker build -f Backend/Dockerfile -t todo-backend:build Backend
+          docker build -f Frontend/Dockerfile \
+            --build-arg "REACT_APP_API_BASE_URL=$API_BASE_URL" \
+            -t todo-frontend:build Frontend
+          docker save todo-backend:build todo-frontend:build | gzip > images.tar.gz
+      - name: Save Docker images
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-images
+          path: images.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+
+  push-images:
+    name: Push images to ECR
+    needs: build-images
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      registry: ${{ steps.ecr.outputs.registry }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: docker-images
       - name: Authenticate to AWS
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ vars.AWS_REGION }}
-
       - name: Log in to Amazon ECR
         id: ecr
         uses: aws-actions/amazon-ecr-login@v2
-
-      - name: Build both Docker images
-        env:
-          ECR_REGISTRY: ${{ steps.ecr.outputs.registry }}
-          API_BASE_URL: ${{ vars.REACT_APP_API_BASE_URL || '/api/todos' }}
-        run: |
-          docker build -f Backend/Dockerfile \
-            -t "$ECR_REGISTRY/$BACKEND_REPOSITORY:$IMAGE_TAG" \
-            -t "$ECR_REGISTRY/$BACKEND_REPOSITORY:latest" Backend
-          docker build -f Frontend/Dockerfile \
-            --build-arg "REACT_APP_API_BASE_URL=$API_BASE_URL" \
-            -t "$ECR_REGISTRY/$FRONTEND_REPOSITORY:$IMAGE_TAG" \
-            -t "$ECR_REGISTRY/$FRONTEND_REPOSITORY:latest" Frontend
-
-      - name: Push both images with build number and latest tags
+      - name: Load and push both images
         env:
           ECR_REGISTRY: ${{ steps.ecr.outputs.registry }}
         run: |
-          for repository in "$BACKEND_REPOSITORY" "$FRONTEND_REPOSITORY"; do
-            docker push "$ECR_REGISTRY/$repository:$IMAGE_TAG"
-            docker push "$ECR_REGISTRY/$repository:latest"
+          docker load -i images.tar.gz
+          for component in backend frontend; do
+            if [ "$component" = backend ]; then
+              repository="$BACKEND_REPOSITORY"
+            else
+              repository="$FRONTEND_REPOSITORY"
+            fi
+            for tag in "$IMAGE_TAG" latest; do
+              docker tag "todo-$component:build" "$ECR_REGISTRY/$repository:$tag"
+              docker push "$ECR_REGISTRY/$repository:$tag"
+            done
           done
 
+  update-helm:
+    name: Update Helm values
+    needs: push-images
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
       - name: Fetch Helm branch
         uses: actions/checkout@v4
         with:
           ref: ${{ env.HELM_BRANCH }}
           path: helm-release
           token: ${{ secrets.HELM_PUSH_TOKEN || github.token }}
-
       - name: Update and push Helm values
         working-directory: helm-release
         env:
-          ECR_REGISTRY: ${{ steps.ecr.outputs.registry }}
+          ECR_REGISTRY: ${{ needs.push-images.outputs.registry }}
         run: |
           python -m pip install --quiet 'ruamel.yaml==0.18.10'
           python - <<'PY'
