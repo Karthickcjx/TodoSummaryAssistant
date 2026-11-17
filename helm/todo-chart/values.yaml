@@ -23,6 +23,7 @@ db:
   defaultUser: root
 
 secret:
+  create: false
   dbPassword: ''
   cohereApiKey: ''
   slackWebhookUrl: ''
