@@ -1,13 +1,13 @@
 backend:
   image: 066107820394.dkr.ecr.ap-south-1.amazonaws.com/todo-backendimg
-  tag: '5'
+  tag: '7'
   replicas: 1
   containerPort: 8080
   servicePort: 8080
 
 frontend:
   image: 066107820394.dkr.ecr.ap-south-1.amazonaws.com/todo-frontendimg
-  tag: '5'
+  tag: '7'
   replicas: 1
   containerPort: 80
   servicePort: 3000
@@ -32,7 +32,8 @@ ingress:
   enabled: true
   host: todo.kcthdevops.site
   servicePort: 3000
-  certificateArn: arn:aws:acm:ap-south-1:066107820394:certificate/691c47a3-b053-4fa2-93c4-fac9f3e39734
+  certificateArn: 
+    arn:aws:acm:ap-south-1:066107820394:certificate/691c47a3-b053-4fa2-93c4-fac9f3e39734
 
 dockerregistry:
   enabled: false
